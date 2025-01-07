@@ -268,7 +268,7 @@ int main(int argc, char* argv[])
             }else if (btn!=last_btn && !press_sent){
                 if (last_btn<btn){
                     but_pressed=1;
-                    printf("%016llX\n",btn);
+                    //printf("%016llX\n",btn);
                     last_btn=btn;
                     skip_count=0;
                 }
