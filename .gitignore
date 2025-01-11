@@ -54,3 +54,4 @@ dkms.conf
 # build products
 *.cast
 sdckeyboard
+*.kate-swp

@@ -3,8 +3,13 @@
 #define USGP 0xFFFF
 #define USG 0x0001
 #define BUFLEN 64
-#define TIMEOUT 500
-#define SKIP_COUNT 50
+#define TIMEOUT_US 500L
+//#define AUTOPRESS_TIME_MS 250L
+//#define DOUBLE_CLICK_WINDOW_MS 150L
+//#define LONG_PRESS_TIME_MS 500
+#define AUTOPRESS_COUNT 100
+#define DOUBLE_CLICK_WINDOW_COUNT 100
+#define LONG_PRESS_TIME_COUNT 200
 
 #define BUT_L1 0x0000000000000800UL
 #define BUT_L4 0x0002000000000000UL
@@ -18,6 +23,36 @@
 
 #define BUT_SIGNIFICANT (BUT_L1|BUT_L4|BUT_L5|BUT_R1|BUT_R4|BUT_R5)
 #define BUT_MODIFIERS (BUT_X|BUT_Y|BUT_DOTS)
+
+struct rumble_t{
+    uint16_t cmd;
+    uint8_t unRumbleType;
+    uint16_t unIntensity;
+    uint16_t unLeftMotorSpeed;
+    uint16_t unRightMotorSpeed;
+    int8_t nLeftGain;
+    int8_t nRightGain;
+};
+
+struct rumble_t rumble_short = {
+    0xEB,
+    0,
+    0,
+    0,
+    3000,
+    7,
+    7
+};
+
+struct rumble_t rumble_long = {
+    0xEB,
+    0,
+    0,
+    0,
+    1000,
+    7,
+    7
+};
 
 struct chords_t {
     int keycode;

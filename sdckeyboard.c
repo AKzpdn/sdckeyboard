@@ -33,6 +33,9 @@ int uinput_dev;
 
 uint64_t but_modifiers=BUT_MODIFIERS;
 uint64_t but_significant=BUT_SIGNIFICANT;
+uint64_t but_modifiers_second_waiter=0;
+uint64_t but_modifiers_stuck_oneshot=0;
+uint64_t but_modifiers_stuck_long=0;
 
 /**
  * printf that can be shut up
@@ -169,6 +172,7 @@ void find_and_send_mod(uint64_t buttons, uint64_t old_buttons){
 int main(int argc, char* argv[])
 {
     signal(SIGINT, inthand);
+    signal(SIGHUP, inthand);
     uint8_t buf[MAX_BUF];   // data buffer for send/recv
     hid_device *dev = NULL; // HIDAPI device we will open
     int res;
@@ -240,17 +244,60 @@ int main(int argc, char* argv[])
     }
     msg("Reading up to %d-byte input report, %d msec timeout...\n",
             buflen, timeout_millis);
-    uint8_t but_pressed=0, press_sent=0;
-    uint16_t skip_count=0;
-    uint64_t last_btn=0, last_mod=0;
+    uint8_t but_pressed=0, press_sent=0, force_mod=0;
+    uint16_t autopress_count=0;
+    uint16_t double_click_window_count=0;
+    uint16_t long_press_time_count=0;
+    uint64_t last_btn=0, last_mod=0, last_mod_sent=0;
+
     do {
         res = hid_read_timeout(dev, buf, buflen, timeout_millis);
         if( res > 0 ) {
             uint64_t btn = *((uint64_t *)&(buf[7]));
             uint64_t mod = btn & BUT_MODIFIERS;
-            if (mod!=last_mod){
-                find_and_send_mod(mod,last_mod);
+            if ( mod!=last_mod||force_mod){
+                force_mod=0;
+                if (last_mod>mod){
+                    but_modifiers_second_waiter=last_mod^mod;
+                    double_click_window_count=0;
+                    //printf("\nrelease %016llX\n",but_modifiers_second_waiter);
+                }else if (last_mod<mod){
+                    long_press_time_count=0;
+                    if ((but_modifiers_stuck_oneshot&mod)||(but_modifiers_stuck_long&mod)){
+                        but_modifiers_stuck_oneshot&=~mod;
+                        but_modifiers_stuck_long&=~mod;
+                            hid_write(dev,(unsigned char *)&rumble_long,sizeof(rumble_long));
+                            //printf("\ndrop all %016llX\n",mod);
+                    }
+                    if ((but_modifiers_second_waiter&(mod^last_mod))>0){
+                        //printf("\npress %016llX,%016llX\n",but_modifiers_second_waiter,mod);
+                        uint64_t tmp=but_modifiers_stuck_oneshot;
+                        but_modifiers_stuck_oneshot^=but_modifiers_second_waiter&mod;
+                        but_modifiers_second_waiter=0;
+                        if (tmp!=but_modifiers_stuck_oneshot){
+                            //printf("\nhold %016llX\n",but_modifiers_stuck_oneshot);
+                            hid_write(dev,(unsigned char *)&rumble_short,sizeof(rumble_short));
+                        }
+                    }
+                }
+                uint64_t new_mod=mod|but_modifiers_stuck_oneshot|but_modifiers_stuck_long;
+                if (new_mod!=last_mod_sent){
+                    find_and_send_mod(new_mod,last_mod_sent);
+                    //printf("\nsent %016llX,%016llX\n",new_mod,last_mod_sent);
+                    last_mod_sent=new_mod;
+                }
                 last_mod=mod;
+            }
+            if ((mod&but_modifiers_stuck_oneshot)>0&&++long_press_time_count==LONG_PRESS_TIME_COUNT){
+                but_modifiers_stuck_oneshot^=mod;
+                but_modifiers_stuck_long|=mod;
+                //printf("\nhold %016llX\n",but_modifiers_stuck_oneshot);
+                //printf("hold long %016llX\n",but_modifiers_stuck_long);
+                hid_write(dev,(unsigned char *)&rumble_short,sizeof(rumble_short));
+            }
+            if (but_modifiers_second_waiter>0&&++double_click_window_count>=DOUBLE_CLICK_WINDOW_COUNT){
+                but_modifiers_second_waiter=0;
+                //printf("\nreset\n");
             }
             btn = btn & BUT_SIGNIFICANT;
             if (btn==0 && but_pressed){
@@ -258,6 +305,10 @@ int main(int argc, char* argv[])
                 if(last_btn!=0 && !press_sent){
                     press_sent=1;
                     find_and_send_chord(last_btn, 1);
+                    if (but_modifiers_stuck_oneshot!=0){
+                        but_modifiers_stuck_oneshot=0;
+                        force_mod=1;
+                    }
                 }
                 if (press_sent){
                     //printf("\nCLEAR\n");
@@ -270,14 +321,18 @@ int main(int argc, char* argv[])
                     but_pressed=1;
                     //printf("%016llX\n",btn);
                     last_btn=btn;
-                    skip_count=0;
+                    autopress_count=0;
                 }
-            }else if (++skip_count>=SKIP_COUNT && btn !=0 && last_btn==btn){
+            }else if (++autopress_count>=AUTOPRESS_COUNT && btn !=0 && last_btn==btn){
                 press_sent=1;
                 find_and_send_chord(btn, 1);
+                if (but_modifiers_stuck_oneshot!=0){
+                    but_modifiers_stuck_oneshot=0;
+                    force_mod=1;
+                }
             }
             memset(buf,0,buflen);  // clear it out
-            usleep(TIMEOUT);
+            usleep(TIMEOUT_US);
         }
         else if( res == -1 )  { // removed device
 
